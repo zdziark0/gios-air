@@ -20,11 +20,17 @@ def _get(url: str, params: dict | None=None, retries: int=3) -> dict:
             time.sleep(1.2 * (attempt + 1))
     raise RuntimeError(f'Nie udało się pobrać danych z {url}: {last_exc}')
 
-def _get_with_fallback(path_v1: str, path_legacy: str, params: dict | None=None) -> dict:
+def _get_with_fallback(path_v1: str, path_legacy: str, params: dict | None=None, raise_on_fail: bool=False):
     try:
         return _get(f'{BASE_V1}{path_v1}', params=params)
     except RuntimeError:
+        pass
+    try:
         return _get(f'{BASE_LEGACY}{path_legacy}')
+    except RuntimeError:
+        if raise_on_fail:
+            raise
+        return {}
 
 @st.cache_data(ttl=3600, show_spinner='Pobieram listę stacji pomiarowych…')
 def fetch_stations() -> pd.DataFrame:

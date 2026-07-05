@@ -13,21 +13,24 @@ def load_stations() -> pd.DataFrame:
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_station_series(station_id: int, station_name: str, city: str, param_code: str) -> pd.DataFrame:
-    sensors = api.fetch_sensors(station_id)
-    if sensors.empty:
-        return pd.DataFrame()
-    match = sensors[sensors['param_code'] == param_code]
-    if match.empty:
-        return pd.DataFrame()
-    sensor_id = int(match.iloc[0]['sensor_id'])
-    raw = api.fetch_measurements(sensor_id)
-    clean = dp.clean_measurements(raw, param_code)
-    if clean.empty:
+    try:
+        sensors = api.fetch_sensors(station_id)
+        if sensors.empty:
+            return pd.DataFrame()
+        match = sensors[sensors['param_code'] == param_code]
+        if match.empty:
+            return pd.DataFrame()
+        sensor_id = int(match.iloc[0]['sensor_id'])
+        raw = api.fetch_measurements(sensor_id)
+        clean = dp.clean_measurements(raw, param_code)
+        if clean.empty:
+            return clean
+        clean['station_id'] = station_id
+        clean['station_name'] = station_name
+        clean['city'] = city
         return clean
-    clean['station_id'] = station_id
-    clean['station_name'] = station_name
-    clean['city'] = city
-    return clean
+    except Exception:
+        return pd.DataFrame()
 st.title('🌫️ Jakość powietrza w Polsce')
 st.caption('Dane: Główny Inspektorat Ochrony Środowiska (GIOŚ) — Państwowy Monitoring Środowiska. Pomiary godzinowe, jednostka µg/m³.')
 try:
