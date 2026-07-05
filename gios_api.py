@@ -3,8 +3,9 @@ import time
 import requests
 import pandas as pd
 import streamlit as st
-BASE = 'https://api.gios.gov.pl/pjp-api/v1/rest'
-HEADERS = {'Accept': 'application/json'}
+BASE_V1 = 'https://api.gios.gov.pl/pjp-api/v1/rest'
+BASE_LEGACY = 'https://api.gios.gov.pl/pjp-api/rest'
+HEADERS = {'Accept': 'application/json, application/ld+json, */*', 'User-Agent': 'gios-air-dashboard/1.0'}
 TIMEOUT = 20
 
 def _get(url: str, params: dict | None=None, retries: int=3) -> dict:
@@ -16,8 +17,14 @@ def _get(url: str, params: dict | None=None, retries: int=3) -> dict:
             return r.json()
         except requests.RequestException as exc:
             last_exc = exc
-            time.sleep(1.5 * (attempt + 1))
+            time.sleep(1.2 * (attempt + 1))
     raise RuntimeError(f'Nie udało się pobrać danych z {url}: {last_exc}')
+
+def _get_with_fallback(path_v1: str, path_legacy: str, params: dict | None=None) -> dict:
+    try:
+        return _get(f'{BASE_V1}{path_v1}', params=params)
+    except RuntimeError:
+        return _get(f'{BASE_LEGACY}{path_legacy}')
 
 @st.cache_data(ttl=3600, show_spinner='Pobieram listę stacji pomiarowych…')
 def fetch_stations() -> pd.DataFrame:
@@ -25,7 +32,12 @@ def fetch_stations() -> pd.DataFrame:
     page = 0
     size = 500
     while True:
-        data = _get(f'{BASE}/station/findAll', params={'size': size, 'page': page})
+        try:
+            data = _get(f'{BASE_V1}/station/findAll', params={'size': size, 'page': page})
+        except RuntimeError:
+            data = _get(f'{BASE_LEGACY}/station/findAll')
+            rows = _unwrap_list(data)
+            break
         items = _unwrap_list(data)
         if not items:
             break
@@ -40,17 +52,17 @@ def fetch_stations() -> pd.DataFrame:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_sensors(station_id: int) -> pd.DataFrame:
-    data = _get(f'{BASE}/station/sensors/{station_id}')
+    data = _get_with_fallback(f'/station/sensors/{station_id}', f'/station/sensors/{station_id}')
     items = _unwrap_list(data)
     rows = []
     for it in items:
         param = it.get('param') or {}
-        rows.append({'sensor_id': it.get('id') or it.get('Identyfikator stanowiska'), 'param_name': param.get('paramName') or it.get('Wskaźnik'), 'param_code': param.get('paramCode') or it.get('Wskaźnik - kod')})
+        rows.append({'sensor_id': it.get('id') or it.get('Identyfikator stanowiska'), 'param_name': param.get('paramName') or it.get('Wskaźnik') or it.get('Nazwa wskaźnika'), 'param_code': param.get('paramCode') or it.get('Wskaźnik - kod') or it.get('Kod wskaźnika')})
     return pd.DataFrame(rows).dropna(subset=['sensor_id'])
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_measurements(sensor_id: int) -> pd.DataFrame:
-    data = _get(f'{BASE}/data/getData/{sensor_id}')
+    data = _get_with_fallback(f'/data/getData/{sensor_id}', f'/data/getData/{sensor_id}')
     items = _unwrap_list(data)
     rows = []
     for it in items:
